@@ -31,6 +31,11 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
@@ -38,17 +43,20 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Vector;
 
 public class MainActivity extends AppCompatActivity {
 
 
-    private static Socket s;
+    private static Socket imageSocket;
     private static PrintWriter printWriter;
     private static EditText ipAdressEditText;
     private static EditText messageEditText;
     private static ListView listView;
     private static ArrayList<String> stringsList;
-
+    private static List<String> imagesPathes;
+    private static boolean permission = false;
+    private static int currentImage = 0;
 
     String message = "Android";
     private static String ip = "192.168.0.107";
@@ -70,43 +78,51 @@ public class MainActivity extends AppCompatActivity {
         messageEditText = (EditText)findViewById(R.id.editTextMessage);
         listView = (ListView)findViewById(R.id.textListView);
         stringsList = new ArrayList<String>();
-
-        addToListView("34");
         if (checkPermissionREAD_EXTERNAL_STORAGE(this)) {
-            // do your stuff..
-
-            String[] imageStrings = {MediaStore.Images.Thumbnails._ID, MediaStore.Images.Media.DATA};
-
-            Uri uri = MediaStore.Images.Thumbnails.EXTERNAL_CONTENT_URI;
-
-            Cursor cursor = getContentResolver().query(uri, imageStrings, null,
-                    null, MediaStore.Images.Thumbnails.IMAGE_ID);
-
-
-            System.out.println("onActivityCreated: " + cursor.getCount());
-            int countImages = cursor.getCount();
-            addToListView(new Integer(countImages).toString());
-            int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
-            for (int i = 0; i < countImages; i++) {
-                cursor.moveToPosition(i);
-                String imagePath = cursor.getString(columnIndex);
-                Uri.withAppendedPath(MediaStore.Images.Thumbnails.EXTERNAL_CONTENT_URI
-                addToListView(imagePath);
-            }
-        }else addToListView("everything is bad");
+            getImagePathes(this);
+            permission = true;
+        }else {
+             addToListView("Can't write exception");
+        }
         listView.setAdapter(new ArrayAdapter<String>(listView.getContext(),android.R.layout.simple_list_item_1,stringsList));
+    }
+
+
+    public List<String> getImagePathes(Context context) {
+        // The list of columns we're interested in:
+        String[] columns = {MediaStore.Images.Media.DATA, MediaStore.Images.Media.DATE_ADDED};
+
+        final Cursor cursor = context.getContentResolver().
+                query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, // Specify the provider
+                        columns, // The columns we're interested in
+                        null, // A WHERE-filter query
+                        null, // The arguments for the filter-query
+                        MediaStore.Images.Media.DATE_ADDED + " DESC" // Order the results, newest first
+                );
+
+        imagesPathes = new ArrayList<String>(cursor.getCount());
+
+        if (cursor.moveToFirst()) {
+            final int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
+            do {
+                imagesPathes.add(cursor.getString(columnIndex));
+            } while (cursor.moveToNext());
+        }
+        cursor.close();
+
+        return imagesPathes;
     }
 
     public static final int MY_PERMISSIONS_REQUEST_READ_EXTERNAL_STORAGE = 123;
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           String[] permissions, int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         switch (requestCode) {
             case MY_PERMISSIONS_REQUEST_READ_EXTERNAL_STORAGE:
                 if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     // do your stuff
                 } else {
+                    grantResults[0] = PackageManager.PERMISSION_GRANTED;
                     Toast.makeText(this, "GET_ACCOUNTS Denied",
                             Toast.LENGTH_SHORT).show();
                 }
@@ -150,8 +166,8 @@ public class MainActivity extends AppCompatActivity {
                            final String permission) {
         AlertDialog.Builder alertBuilder = new AlertDialog.Builder(context);
         alertBuilder.setCancelable(true);
-        alertBuilder.setTitle("Permission necessary");
-        alertBuilder.setMessage(msg + " permission is necessary");
+        alertBuilder.setTitle("Необходимо разрешение");
+        alertBuilder.setMessage("Для корректной работы приложения необходимо это разрешение");
         alertBuilder.setPositiveButton(android.R.string.yes,
                 new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
@@ -178,21 +194,59 @@ public class MainActivity extends AppCompatActivity {
     private class SendRequest extends AsyncTask<String, Void, String> {
         @Override
         protected String doInBackground(String... params){
+            if (!permission) return null;
             String output = "";
-            try{
-                System.out.println("In sending");
-                output += "In sending on ip: ";
-                output += params[0];
-                output += ":5000; ";
-                s = new Socket(params[0], 5000);
-                System.out.println("Client Connected");
-                output += "Client Connected";
+            try {
+                imageSocket = new Socket(params[0], 5000);
+                String myDeviceName = Build.MODEL;
+                DataOutputStream writer = new DataOutputStream(imageSocket.getOutputStream());
+                DataInputStream reader = new DataInputStream(imageSocket.getInputStream());
+
+                byte[] sendBuffer = new byte[16 * 1024];
+                int readCount;
+                File currentImage;
+                FileInputStream fileReader;
+                int imagesFromPreviusCopyCount;
+                Vector<String> imagesFromPreviusCopy = new Vector<>();
+                ///// Logic of write
+                writer.writeUTF(myDeviceName);
+                addToListView(myDeviceName);
+                writer.writeUTF(message);
+                writer.flush();
                 addToListView(message);
-                printWriter = new PrintWriter(s.getOutputStream());
-                printWriter.write(message);
-                printWriter.flush();
-                printWriter.close();
-                s.close();
+                imagesFromPreviusCopyCount = reader.readInt();
+                for (int i = 0; i < imagesFromPreviusCopyCount; i++) {
+                    imagesFromPreviusCopy.add(reader.readUTF());
+                }
+
+                for(int i = 0; i < 10; i++){
+                    String currentImagePath = imagesPathes.get(i);
+                    if (!imagesFromPreviusCopy.contains(currentImagePath)) {
+                        currentImage = new File(currentImagePath);
+                        fileReader = new FileInputStream(currentImage);
+                        long fileLength = currentImage.length();
+                        ///////////////
+                        writer.writeUTF(currentImagePath);
+                        addToListView(currentImagePath);
+                        writer.writeLong(fileLength);
+                        addToListView(fileLength + "");
+
+
+                        int sendCountBytes = 0;
+                        while ((readCount = fileReader.read(sendBuffer)) != -1) {
+                            writer.write(sendBuffer, 0, readCount);
+                            sendCountBytes+=readCount;
+                            addToListView("Was writed: " + sendCountBytes);
+                        }
+
+                        ////////////////////
+                        writer.flush();
+                        fileReader.close();
+
+                    }
+                }
+                writer.writeUTF("null");
+                imageSocket.close();
 
             }
             catch(UnknownHostException ex){
@@ -214,10 +268,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void send_text(View v){
-        String ipAdress = ipAdressEditText.getText().toString();
-        message = messageEditText.getText().toString();
-        SendRequest send = new SendRequest();
-        send.execute(ipAdress);
+        try{
+            currentImage++;
+            String ipAdress = ipAdressEditText.getText().toString();
+            message = messageEditText.getText().toString().replace('@', 'a');
+            SendRequest send = new SendRequest();
+            addToListView("sendRequest created");
+            send.execute(ipAdress, imagesPathes.get(currentImage));
+        }catch (Exception e){
+            addToListView("sendTextException");
+        }
     }
 
 
