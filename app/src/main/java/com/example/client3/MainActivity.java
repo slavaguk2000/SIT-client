@@ -31,6 +31,8 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -39,6 +41,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -191,63 +194,65 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+
     private class SendRequest extends AsyncTask<String, Void, String> {
+
+        Socket socket;
         @Override
         protected String doInBackground(String... params){
             if (!permission) return null;
             String output = "";
             try {
-                imageSocket = new Socket(params[0], 5000);
+               socket = new Socket(params[0], 2154);
                 String myDeviceName = Build.MODEL;
-                DataOutputStream writer = new DataOutputStream(imageSocket.getOutputStream());
-                DataInputStream reader = new DataInputStream(imageSocket.getInputStream());
+                DataOutputStream writer = new DataOutputStream(socket.getOutputStream());
+                DataInputStream reader = new DataInputStream(socket.getInputStream());
 
-                byte[] sendBuffer = new byte[16 * 1024];
                 int readCount;
                 File currentImage;
                 FileInputStream fileReader;
                 int imagesFromPreviusCopyCount;
                 Vector<String> imagesFromPreviusCopy = new Vector<>();
                 ///// Logic of write
+
                 writer.writeUTF(myDeviceName);
                 addToListView(myDeviceName);
                 writer.writeUTF(message);
-                writer.flush();
                 addToListView(message);
+                writer.flush();
                 imagesFromPreviusCopyCount = reader.readInt();
                 for (int i = 0; i < imagesFromPreviusCopyCount; i++) {
-                    imagesFromPreviusCopy.add(reader.readUTF());
+                    imagesFromPreviusCopy.add(reader.readUTF().replace("\\", "/"));
                 }
-
-                for(int i = 0; i < 10; i++){
+                for(int i = 0; i < 20; i++){
                     String currentImagePath = imagesPathes.get(i);
                     if (!imagesFromPreviusCopy.contains(currentImagePath)) {
                         currentImage = new File(currentImagePath);
-                        fileReader = new FileInputStream(currentImage);
+
                         long fileLength = currentImage.length();
                         ///////////////
-                        writer.writeUTF(currentImagePath);
-                        addToListView(currentImagePath);
-                        writer.writeLong(fileLength);
-                        addToListView(fileLength + "");
 
+                        writer.writeLong(fileLength);
+                        writer.writeUTF(currentImagePath);
+                        fileReader = new FileInputStream(currentImage);
+                        addToListView(currentImagePath);
+                        addToListView(fileLength + "");
+                        byte[] sendBuffer = new byte[64 * 1024];
 
                         int sendCountBytes = 0;
                         while ((readCount = fileReader.read(sendBuffer)) != -1) {
                             writer.write(sendBuffer, 0, readCount);
-                            sendCountBytes+=readCount;
-                            addToListView("Was writed: " + sendCountBytes);
                         }
-
                         ////////////////////
                         writer.flush();
                         fileReader.close();
-
                     }
                 }
+                writer.writeLong(0);
                 writer.writeUTF("null");
-                imageSocket.close();
-
+                wait(5000);
+                socket.close();
+                addToListView("Finish copying");
             }
             catch(UnknownHostException ex){
                 System.out.println("UnknownHostException");
@@ -261,7 +266,7 @@ public class MainActivity extends AppCompatActivity {
                 output += "Exception";
             }
             finally {
-               // Toast.makeText(getApplicationContext(), output, Toast.LENGTH_LONG).show();
+                addToListView(output);
             }
             return null;
         }
@@ -269,6 +274,8 @@ public class MainActivity extends AppCompatActivity {
 
     public void send_text(View v){
         try{
+            Button send_button = (Button)v;
+            send_button.setEnabled(false);
             currentImage++;
             String ipAdress = ipAdressEditText.getText().toString();
             message = messageEditText.getText().toString().replace('@', 'a');
