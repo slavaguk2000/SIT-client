@@ -3,117 +3,92 @@ package com.example.client3;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
-import android.net.Uri;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.os.Build;
-import android.provider.ContactsContract;
 import android.provider.MediaStore;
-import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.text.format.Formatter;
 import android.view.View;
-import android.view.View.OnClickListener;
-import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 import android.widget.Toast;
-
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.lang.reflect.Array;
-import java.net.InetAddress;
-import java.net.Socket;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Vector;
 
 public class MainActivity extends AppCompatActivity {
 
-
-    private static Socket imageSocket;
-    private static PrintWriter printWriter;
-    private static EditText ipAdressEditText;
-    private static EditText messageEditText;
-    private static ListView listView;
+    private EditText ipAddressEditText;
+    private EditText messageEditText;
     private static ArrayList<String> stringsList;
-    private static List<String> imagesPathes;
+    private static List<String> imagesPaths;
     private static boolean permission = false;
-    private static int currentImage = 0;
-
-    String message = "Android";
-    private static String ip = "192.168.0.107";
-
-    /**
-     * Cursor used to access the results from querying for images on the SD card.
-     */
-    //private Cursor cursor;
-    /*
-     * Column index for the Thumbnails Image IDs.
-     */
-    //private int columnIndex;
+    private  static Context context;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        context = this;
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        ipAdressEditText = (EditText)findViewById(R.id.editTextIP);
+        ipAddressEditText = (EditText)findViewById(R.id.editTextIP);
         messageEditText = (EditText)findViewById(R.id.editTextMessage);
-        listView = (ListView)findViewById(R.id.textListView);
         stringsList = new ArrayList<String>();
         if (checkPermissionREAD_EXTERNAL_STORAGE(this)) {
             getImagePathes(this);
             permission = true;
-        }else {
-             addToListView("Can't write exception");
         }
-        listView.setAdapter(new ArrayAdapter<String>(listView.getContext(),android.R.layout.simple_list_item_1,stringsList));
+        setLocalIp();
     }
 
+    private void setLocalIp(){
+        AsyncTask<Void, Void, Void> getLocalIp = new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... voids) {
+                    ConnectivityManager cm = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+                    NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+                    WifiManager wm = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
 
-    public List<String> getImagePathes(Context context) {
-        // The list of columns we're interested in:
+                    WifiInfo connectionInfo = wm.getConnectionInfo();
+                    int ipAddress = connectionInfo.getIpAddress();
+                    String myIp = Formatter.formatIpAddress(ipAddress);
+                final String finalMyIp = new String(myIp);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        ipAddressEditText.setText(finalMyIp);
+                    }
+                });
+                return null;
+            }
+        };
+        getLocalIp.execute();
+        return;
+    }
+
+    private List<String> getImagePathes(Context context) {
         String[] columns = {MediaStore.Images.Media.DATA, MediaStore.Images.Media.DATE_ADDED};
 
         final Cursor cursor = context.getContentResolver().
-                query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, // Specify the provider
-                        columns, // The columns we're interested in
-                        null, // A WHERE-filter query
-                        null, // The arguments for the filter-query
-                        MediaStore.Images.Media.DATE_ADDED + " DESC" // Order the results, newest first
-                );
-
-        imagesPathes = new ArrayList<String>(cursor.getCount());
-
+                query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, columns, null, null, MediaStore.Images.Media.DATE_ADDED + " DESC");
+        imagesPaths = new ArrayList<String>(cursor.getCount());
         if (cursor.moveToFirst()) {
             final int columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
             do {
-                imagesPathes.add(cursor.getString(columnIndex));
+                imagesPaths.add(cursor.getString(columnIndex));
             } while (cursor.moveToNext());
         }
         cursor.close();
-
-        return imagesPathes;
+        return imagesPaths;
     }
 
     public static final int MY_PERMISSIONS_REQUEST_READ_EXTERNAL_STORAGE = 123;
@@ -183,108 +158,15 @@ public class MainActivity extends AppCompatActivity {
         alert.show();
     }
 
-    void addToListView(String addingString){
-        final String addStr = new String(addingString);
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                stringsList.add(addStr);
-            }
-        });
-    }
-
-
-
-    private class SendRequest extends AsyncTask<String, Void, String> {
-
-        Socket socket;
-        @Override
-        protected String doInBackground(String... params){
-            if (!permission) return null;
-            String output = "";
-            try {
-               socket = new Socket(params[0], 2154);
-                String myDeviceName = Build.MODEL;
-                DataOutputStream writer = new DataOutputStream(socket.getOutputStream());
-                DataInputStream reader = new DataInputStream(socket.getInputStream());
-
-                int readCount;
-                File currentImage;
-                FileInputStream fileReader;
-                int imagesFromPreviusCopyCount;
-                Vector<String> imagesFromPreviusCopy = new Vector<>();
-                ///// Logic of write
-
-                writer.writeUTF(myDeviceName);
-                addToListView(myDeviceName);
-                writer.writeUTF(message);
-                addToListView(message);
-                writer.flush();
-                imagesFromPreviusCopyCount = reader.readInt();
-                for (int i = 0; i < imagesFromPreviusCopyCount; i++) {
-                    imagesFromPreviusCopy.add(reader.readUTF().replace("\\", "/"));
-                }
-                for(int i = 0; i < 20; i++){
-                    String currentImagePath = imagesPathes.get(i);
-                    if (!imagesFromPreviusCopy.contains(currentImagePath)) {
-                        currentImage = new File(currentImagePath);
-
-                        long fileLength = currentImage.length();
-                        ///////////////
-
-                        writer.writeLong(fileLength);
-                        writer.writeUTF(currentImagePath);
-                        fileReader = new FileInputStream(currentImage);
-                        addToListView(currentImagePath);
-                        addToListView(fileLength + "");
-                        byte[] sendBuffer = new byte[64 * 1024];
-
-                        int sendCountBytes = 0;
-                        while ((readCount = fileReader.read(sendBuffer)) != -1) {
-                            writer.write(sendBuffer, 0, readCount);
-                        }
-                        ////////////////////
-                        writer.flush();
-                        fileReader.close();
-                    }
-                }
-                writer.writeLong(0);
-                writer.writeUTF("null");
-                wait(5000);
-                socket.close();
-                addToListView("Finish copying");
-            }
-            catch(UnknownHostException ex){
-                System.out.println("UnknownHostException");
-                output += "UnknownHostException";
-            }catch(IOException ex){
-                System.out.println("IOException");
-                output += "IOException";
-            }
-            catch (Exception ex){
-                System.out.println("Exception");
-                output += "Exception";
-            }
-            finally {
-                addToListView(output);
-            }
-            return null;
-        }
-    }
-
-    public void send_text(View v){
+    public void send_images(View v){
         try{
             Button send_button = (Button)v;
-            send_button.setEnabled(false);
-            currentImage++;
-            String ipAdress = ipAdressEditText.getText().toString();
-            message = messageEditText.getText().toString().replace('@', 'a');
-            SendRequest send = new SendRequest();
-            addToListView("sendRequest created");
-            send.execute(ipAdress, imagesPathes.get(currentImage));
-        }catch (Exception e){
-            addToListView("sendTextException");
-        }
+            String ipAddress = ipAddressEditText.getText().toString();
+            String name = messageEditText.getText().toString().replace('@', 'a');
+            if (!permission) return;
+            SenderImages send = new SenderImages(imagesPaths, name, send_button, this);
+            send.execute(ipAddress);
+        }catch (Exception e){}
     }
 
 
