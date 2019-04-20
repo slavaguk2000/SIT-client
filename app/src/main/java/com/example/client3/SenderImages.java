@@ -257,7 +257,7 @@ public class SenderImages extends AsyncTask<String, Void, String> {
             }
             setProgress(100, information);
         }else{
-            PopupMenu popupMenu = new PopupMenu(context, nameText);
+            final PopupMenu popupMenu = new PopupMenu(context, nameText);
             Vector<String> existNames= new Vector<>();
             int namesSize = reader.readInt();//количество сохранений
             for (int i = 0; i < namesSize; i++) {
@@ -278,7 +278,13 @@ public class SenderImages extends AsyncTask<String, Void, String> {
                     return false;
                 }
             });
-            popupMenu.show();
+            Handler handler = new Handler(Looper.getMainLooper());
+            handler.post(new Runnable() {
+                public void run() {
+                    popupMenu.show();
+                }
+            });
+
         }
     }
 }
